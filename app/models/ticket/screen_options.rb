@@ -53,7 +53,7 @@ returns
       end
       types.each do |type_name|
         type = Ticket::Article::Type.lookup(name: type_name)
-        next if type.blank?
+        next if type.blank? || !type.active
 
         type_ids.push type.id
       end

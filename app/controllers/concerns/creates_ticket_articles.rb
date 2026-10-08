@@ -14,9 +14,10 @@ module CreatesTicketArticles # rubocop:disable Metrics/ModuleLength
     # check min. params
     raise Exceptions::UnprocessableContent, __("Need at least an 'article body' field.") if params[:body].nil?
 
+    default_type = Ticket::Article::Type.find_by!(name: 'note')
     # fill default values
     if params[:type_id].blank? && params[:type].blank?
-      params[:type_id] = Ticket::Article::Type.lookup(name: 'note').id
+      params[:type_id] = default_type.id
     end
     if params[:sender_id].blank? && params[:sender].blank?
       sender = 'Customer'
@@ -31,14 +32,17 @@ module CreatesTicketArticles # rubocop:disable Metrics/ModuleLength
     clean_params          = Ticket::Article.association_name_to_id_convert(params)
     clean_params          = Ticket::Article.param_cleanup(clean_params, true)
 
+    # Retrieve type
+    type = Ticket::Article::Type.lookup(id: clean_params[:type_id])
+
     # overwrite params
     if !current_user.permissions?('ticket.agent')
       clean_params[:sender_id] = Ticket::Article::Sender.lookup(name: 'Customer').id
       clean_params.delete(:sender)
       clean_params.delete(:origin_by_id)
-      type = Ticket::Article::Type.lookup(id: clean_params[:type_id])
-      if !type.name.match?(%r{^(note|web)$})
-        clean_params[:type_id] = Ticket::Article::Type.lookup(name: 'note').id
+      if !type&.name.match?(%r{^(note|web)$})
+        clean_params[:type_id] = default_type.id
+        type = default_type
       end
       clean_params.delete(:type)
       clean_params[:internal] = false
@@ -47,7 +51,11 @@ module CreatesTicketArticles # rubocop:disable Metrics/ModuleLength
       clean_params.delete(:preferences)
     end
 
-    if Ticket::Article::Type.lookup(id: clean_params[:type_id])&.name == 'email' && ticket.group.email_address.blank?
+    if !type&.active
+      # only visible when someone uses the API directly or the setting was changed
+      raise Exceptions::UnprocessableContent, __('This article type is not active.')
+    end
+    if type&.name == 'email' && ticket.group.email_address.blank?
       raise Exceptions::UnprocessableContent, __('This group has no email address configured for outgoing communication.')
     end
 
